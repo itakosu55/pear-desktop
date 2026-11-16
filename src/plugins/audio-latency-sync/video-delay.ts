@@ -1,10 +1,32 @@
+import { t } from '@/i18n';
 import {
   getAudioLatencyMs,
   onAudioLatencyChange,
 } from '@/plugins/utils/renderer/audio-latency';
 
 const MAX_CANVAS_WIDTH = 1920;
+const PIP_MAX_WIDTH = 1280;
+const PIP_MAX_HEIGHT = 720;
 const MAX_QUEUE_SIZE = 120;
+
+export interface DelayedFrameSink {
+  drawFrame(bitmap: ImageBitmap): void;
+  clear(): void;
+}
+
+/**
+ * PiP 向けに動画の元解像度を最大 1280x720 に拡大なしでアスペクト比維持フィットさせる
+ */
+export const fitPipSize = (
+  videoW: number,
+  videoH: number,
+): { width: number; height: number } => {
+  const scale = Math.min(1, PIP_MAX_WIDTH / videoW, PIP_MAX_HEIGHT / videoH);
+  return {
+    width: Math.min(PIP_MAX_WIDTH, Math.max(1, Math.round(videoW * scale))),
+    height: Math.min(PIP_MAX_HEIGHT, Math.max(1, Math.round(videoH * scale))),
+  };
+};
 
 interface DelayedFrame {
   t: number;
@@ -25,6 +47,7 @@ export class VideoDelayRenderer {
 
   private canvas: HTMLCanvasElement | null = null;
   private ctx: CanvasRenderingContext2D | null = null;
+  private pipSink: DelayedFrameSink | null = null;
 
   private queue: DelayedFrame[] = [];
   private currentBitmap: ImageBitmap | null = null;
@@ -59,7 +82,38 @@ export class VideoDelayRenderer {
       this.update();
     });
 
+    this.video.addEventListener(
+      'enterpictureinpicture',
+      this.onPictureInPictureChange,
+    );
+    this.video.addEventListener(
+      'leavepictureinpicture',
+      this.onPictureInPictureChange,
+    );
+
     this.update();
+  }
+
+  /**
+   * 遅延フレームの出力先シンク（PiP 用）を設定または解除する
+   */
+  public setPipSink(sink: DelayedFrameSink | null): void {
+    this.pipSink = sink;
+    this.update();
+
+    if (this.pipSink && this.currentBitmap && !this.hasClearedCanvas) {
+      this.pipSink.drawFrame(this.currentBitmap);
+    }
+
+    if (this.active) {
+      if (this.pipSink) {
+        this.drawPlaceholder();
+      } else if (this.currentBitmap && !this.hasClearedCanvas) {
+        this.drawBitmap(this.currentBitmap);
+      } else if (this.ctx && this.canvas) {
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+      }
+    }
   }
 
   /**
@@ -69,7 +123,9 @@ export class VideoDelayRenderer {
     if (!this.supported || this.destroyed) return;
 
     const shouldBeActive =
-      this.isIntersecting && getAudioLatencyMs('video') > 0;
+      getAudioLatencyMs('video') > 0 &&
+      document.pictureInPictureElement !== this.video &&
+      (this.isIntersecting || this.pipSink !== null);
     if (shouldBeActive && !this.active) {
       this.activate();
     } else if (!shouldBeActive && this.active) {
@@ -86,6 +142,14 @@ export class VideoDelayRenderer {
 
     this.deactivate();
 
+    this.video.removeEventListener(
+      'enterpictureinpicture',
+      this.onPictureInPictureChange,
+    );
+    this.video.removeEventListener(
+      'leavepictureinpicture',
+      this.onPictureInPictureChange,
+    );
     this.intersectionObserver?.disconnect();
     this.unsubscribeLatency?.();
   }
@@ -111,6 +175,9 @@ export class VideoDelayRenderer {
     // プレイヤーの操作UIや字幕が上に重なるよう、同じ親要素内の video 直後に挿入する
     this.video.after(canvas);
     this.syncCanvasGeometry();
+    if (this.pipSink) {
+      this.drawPlaceholder();
+    }
 
     this.resizeObserver = new ResizeObserver(() => {
       this.syncCanvasGeometry();
@@ -159,6 +226,7 @@ export class VideoDelayRenderer {
     this.video.removeEventListener('loadstart', this.onMediaReset);
 
     this.clearQueue();
+    this.pipSink?.clear();
 
     this.currentBitmap?.close();
     this.currentBitmap = null;
@@ -200,8 +268,10 @@ export class VideoDelayRenderer {
       this.canvas.width = pixelWidth;
       this.canvas.height = pixelHeight;
 
-      // サイズ再設定により描画内容が消去されるため、表示中のフレームがあれば再描画する
-      if (this.currentBitmap && !this.hasClearedCanvas) {
+      // サイズ再設定により描画内容が消去されるため、PiP 中はプレースホルダー、通常時は表示中のフレームを再描画する
+      if (this.pipSink) {
+        this.drawPlaceholder();
+      } else if (this.currentBitmap && !this.hasClearedCanvas) {
         this.drawBitmap(this.currentBitmap);
       }
     }
@@ -219,34 +289,36 @@ export class VideoDelayRenderer {
     // requestVideoFrameCallback はワンショットのため毎回再登録する
     this.vfcId = this.video.requestVideoFrameCallback(this.onVideoFrame);
 
-    const canvas = this.canvas;
-    if (!canvas) return;
-
     const videoW = this.video.videoWidth;
     const videoH = this.video.videoHeight;
-    const canvasW = canvas.width;
-    const canvasH = canvas.height;
     if (
       videoW <= 0 ||
       videoH <= 0 ||
-      canvasW <= 0 ||
-      canvasH <= 0 ||
       this.video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA
     ) {
       return;
     }
 
-    const scale = Math.min(canvasW / videoW, canvasH / videoH);
-    const resizeWidth = Math.min(
-      canvasW,
-      Math.max(1, Math.round(videoW * scale)),
-    );
-    const resizeHeight = Math.min(
-      canvasH,
-      Math.max(1, Math.round(videoH * scale)),
-    );
+    let resizeWidth: number;
+    let resizeHeight: number;
+    if (this.pipSink) {
+      ({ width: resizeWidth, height: resizeHeight } = fitPipSize(
+        videoW,
+        videoH,
+      ));
+    } else {
+      const canvas = this.canvas;
+      if (!canvas) return;
+      const canvasW = canvas.width;
+      const canvasH = canvas.height;
+      if (canvasW <= 0 || canvasH <= 0) return;
 
-    const t = metadata.expectedDisplayTime;
+      const scale = Math.min(canvasW / videoW, canvasH / videoH);
+      resizeWidth = Math.min(canvasW, Math.max(1, Math.round(videoW * scale)));
+      resizeHeight = Math.min(canvasH, Math.max(1, Math.round(videoH * scale)));
+    }
+
+    const frameTime = metadata.expectedDisplayTime;
     const gen = this.generation;
 
     // VideoFrame を保持するとハードウェアデコーダが枯渇するため ImageBitmap へ複製する
@@ -260,13 +332,13 @@ export class VideoDelayRenderer {
           !this.active ||
           this.destroyed ||
           gen !== this.generation ||
-          t <= this.currentDisplayedT
+          frameTime <= this.currentDisplayedT
         ) {
           bitmap.close();
           return;
         }
 
-        this.insertFrame({ t, bitmap });
+        this.insertFrame({ t: frameTime, bitmap });
       },
       () => {
         // デコード不可などで取得に失敗したフレームはスキップする
@@ -315,7 +387,11 @@ export class VideoDelayRenderer {
     }
 
     if (target.bitmap !== this.currentBitmap) {
-      this.drawBitmap(target.bitmap);
+      if (this.pipSink) {
+        this.pipSink.drawFrame(target.bitmap);
+      } else {
+        this.drawBitmap(target.bitmap);
+      }
       this.currentBitmap?.close();
       this.currentBitmap = target.bitmap;
       this.currentDisplayedT = target.t;
@@ -350,6 +426,28 @@ export class VideoDelayRenderer {
     this.ctx.drawImage(bitmap, drawX, drawY, drawW, drawH);
   }
 
+  private drawPlaceholder(): void {
+    if (!this.ctx || !this.canvas) return;
+
+    const canvasW = this.canvas.width;
+    const canvasH = this.canvas.height;
+    if (canvasW <= 0 || canvasH <= 0) return;
+
+    this.ctx.fillStyle = '#000000';
+    this.ctx.fillRect(0, 0, canvasW, canvasH);
+
+    const dpr = window.devicePixelRatio || 1;
+    this.ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+    this.ctx.font = `${Math.round(14 * dpr)}px Roboto, Arial, sans-serif`;
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'middle';
+    this.ctx.fillText(
+      t('plugins.audio-latency-sync.pip-placeholder'),
+      canvasW / 2,
+      canvasH / 2,
+    );
+  }
+
   private clearQueue(): void {
     for (const entry of this.queue) {
       entry.bitmap.close();
@@ -357,19 +455,29 @@ export class VideoDelayRenderer {
     this.queue.length = 0;
   }
 
+  private readonly onPictureInPictureChange = (): void => {
+    this.update();
+  };
+
   private readonly onSeeking = (): void => {
     this.generation++;
     this.currentDisplayedT = -Infinity;
     this.clearQueue();
+    this.pipSink?.clear();
   };
 
   private readonly onMediaReset = (): void => {
     this.generation++;
     this.currentDisplayedT = -Infinity;
     this.clearQueue();
+    this.pipSink?.clear();
 
     if (this.ctx && this.canvas) {
-      this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+      if (this.pipSink) {
+        this.drawPlaceholder();
+      } else {
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+      }
       this.hasClearedCanvas = true;
     }
   };

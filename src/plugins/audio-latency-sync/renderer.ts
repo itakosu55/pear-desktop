@@ -7,6 +7,7 @@ import { waitForElement } from '@/utils/wait-for-element';
 
 import { openCalibration as openCalibrationOverlay } from './calibration';
 import { clampManualOffsetMs } from './constants';
+import { DelayedPictureInPicture } from './pip';
 import { VideoDelayRenderer } from './video-delay';
 
 import type { AudioLatencySyncPluginConfig } from './index';
@@ -39,6 +40,7 @@ export const renderer = createRenderer<
     effectiveMs: number;
     lastLoggedEffectiveMs?: number;
     videoDelay?: VideoDelayRenderer;
+    pip?: DelayedPictureInPicture;
     closeCalibration?: () => void;
     runId: number;
     audioCanPlayHandler: (event: CustomEvent<Compressor>) => void;
@@ -153,6 +155,8 @@ export const renderer = createRenderer<
     }
     this.closeCalibration?.();
     this.closeCalibration = undefined;
+    this.pip?.destroy();
+    this.pip = undefined;
     this.videoDelay?.destroy();
     this.videoDelay = undefined;
     document.removeEventListener(
@@ -186,6 +190,15 @@ export const renderer = createRenderer<
         // waitForElement 完了前に stop() や再 start() が呼ばれた場合は生成しない
         if (runId !== this.runId) return;
         this.videoDelay = new VideoDelayRenderer(video);
+        this.pip = new DelayedPictureInPicture(
+          video,
+          this.videoDelay,
+          (allowed) => {
+            ctx.ipc
+              .invoke('audio-latency-sync:set-background-throttling', allowed)
+              .catch(() => {});
+          },
+        );
         this.videoDelay.update();
       },
     );
@@ -204,6 +217,8 @@ export const renderer = createRenderer<
     }
     this.closeCalibration?.();
     this.closeCalibration = undefined;
+    this.pip?.destroy();
+    this.pip = undefined;
     this.videoDelay?.destroy();
     this.videoDelay = undefined;
     document.removeEventListener(

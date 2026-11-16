@@ -369,6 +369,7 @@
         "sync-visualizer": "ビジュアライザーを同期"
       },
       "name": "音声遅延補正",
+      "pip-placeholder": "ピクチャー イン ピクチャーで再生中",
       "prompt": {
         "calibration": {
           "apply": "適用",

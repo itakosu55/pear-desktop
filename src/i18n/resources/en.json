@@ -369,6 +369,7 @@
         "sync-visualizer": "Sync visualizer"
       },
       "name": "Audio Latency Sync",
+      "pip-placeholder": "Playing in picture-in-picture",
       "prompt": {
         "calibration": {
           "apply": "Apply",

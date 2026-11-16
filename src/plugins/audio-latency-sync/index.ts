@@ -4,6 +4,7 @@ import { t } from '@/i18n';
 import promptOptions from '@/providers/prompt-options';
 import { createPlugin } from '@/utils';
 
+import { backend } from './backend';
 import {
   clampManualOffsetMs,
   MAX_MANUAL_OFFSET_MS,
@@ -32,7 +33,12 @@ const defaultConfig: AudioLatencySyncPluginConfig = {
   detectedLatencyMs: 0,
 };
 
-export default createPlugin({
+export default createPlugin<
+  typeof backend,
+  unknown,
+  typeof renderer,
+  AudioLatencySyncPluginConfig
+>({
   name: () => t('plugins.audio-latency-sync.name'),
   description: () => t('plugins.audio-latency-sync.description'),
   restartNeeded: false,
@@ -127,5 +133,6 @@ export default createPlugin({
     ];
   },
 
+  backend,
   renderer,
 });
