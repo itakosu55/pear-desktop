@@ -12,15 +12,17 @@ class WaveVisualizer extends Visualizer {
     audioSource: MediaElementAudioSourceNode,
     canvas: HTMLCanvasElement,
     audioNode: GainNode,
-    _stream: MediaStream,
+    _stream: MediaStream | undefined,
     config: VisualizerPluginConfig,
   ) {
     super(audioSource, audioNode);
 
-    this.visualizer = new Wave(
-      { context: audioContext, source: audioSource },
-      canvas,
-    );
+    // Feed Wave from the (latency-delayed) audioNode via an AnalyserNode.
+    // Passing an AnalyserNode also keeps Wave from connecting anything
+    // to audioContext.destination.
+    const analyser = audioContext.createAnalyser();
+    audioNode.connect(analyser);
+    this.visualizer = new Wave(analyser, canvas);
     for (const animation of config.wave.animations) {
       const TargetVisualizer =
         this.visualizer.animations[
@@ -38,7 +40,7 @@ class WaveVisualizer extends Visualizer {
   destroy() {
     this.visualizer.clearAnimations();
     try {
-      this.audioSource.disconnect(this.audioNode);
+      this.audioNode.disconnect();
     } catch {}
   }
 }

@@ -351,6 +351,30 @@
       "description": "Apply compression to audio (lowers the volume of the loudest parts of the signal and raises the volume of the softest parts)",
       "name": "Audio Compressor"
     },
+    "audio-latency-sync": {
+      "description": "Delays video, lyrics and visualizers to compensate for output-device audio latency (e.g. Bluetooth)",
+      "menu": {
+        "manual-offset": "Set manual offset...",
+        "mode": {
+          "label": "Mode",
+          "submenu": {
+            "auto": "Auto (OS-reported)",
+            "auto-offset": "Auto + manual offset",
+            "manual": "Manual"
+          }
+        },
+        "sync-lyrics": "Sync lyrics",
+        "sync-video": "Sync video",
+        "sync-visualizer": "Sync visualizer"
+      },
+      "name": "Audio Latency Sync",
+      "prompt": {
+        "manual-offset": {
+          "label": "Manual offset in ms (-1000 to 2000). OS-reported latency: {{detected}} ms",
+          "title": "Set manual offset"
+        }
+      }
+    },
     "auth-proxy-adapter": {
       "description": "Support for the use of authentication proxy services",
       "menu": {

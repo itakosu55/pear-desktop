@@ -351,6 +351,30 @@
       "description": "オーディオにコンプレッサーを適用します（信号での一番大きい部分の音量を下げ、小さい部分の音量を上げる）",
       "name": "オーディオコンプレッサー"
     },
+    "audio-latency-sync": {
+      "description": "出力デバイス（Bluetoothなど）の音声遅延に合わせて動画・歌詞・ビジュアライザーの表示を遅らせます",
+      "menu": {
+        "manual-offset": "手動オフセットを設定...",
+        "mode": {
+          "label": "モード",
+          "submenu": {
+            "auto": "自動（OS報告値）",
+            "auto-offset": "自動 + 手動オフセット",
+            "manual": "手動"
+          }
+        },
+        "sync-lyrics": "歌詞を同期",
+        "sync-video": "動画を同期",
+        "sync-visualizer": "ビジュアライザーを同期"
+      },
+      "name": "音声遅延補正",
+      "prompt": {
+        "manual-offset": {
+          "label": "手動オフセット（ms、-1000〜2000）。OS報告の遅延: {{detected}} ms",
+          "title": "手動オフセットを設定"
+        }
+      }
+    },
     "auth-proxy-adapter": {
       "description": "認証プロキシサービスの利用サポート",
       "menu": {

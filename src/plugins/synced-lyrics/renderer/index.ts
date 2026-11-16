@@ -1,3 +1,4 @@
+import { getAudioLatencyMs } from '@/plugins/utils/renderer/audio-latency';
 import { createRenderer } from '@/utils';
 import { waitForElement } from '@/utils/wait-for-element';
 
@@ -54,10 +55,12 @@ export const renderer = createRenderer<
   },
   async videoDataChange() {
     if (!this.updateTimestampInterval) {
-      this.updateTimestampInterval = setInterval(
-        () => setCurrentTime((_ytAPI?.getCurrentTime() ?? 0) * 1000),
-        100,
-      );
+      this.updateTimestampInterval = setInterval(() => {
+        const currentTimeMs = (_ytAPI?.getCurrentTime() ?? 0) * 1000;
+        setCurrentTime(
+          Math.max(0, currentTimeMs - getAudioLatencyMs('lyrics')),
+        );
+      }, 100);
     }
 
     // prettier-ignore

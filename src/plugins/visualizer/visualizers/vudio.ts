@@ -37,7 +37,7 @@ class VudioVisualizer extends Visualizer {
   destroy() {
     this.visualizer.pause();
     try {
-      this.audioSource.disconnect(this.audioNode);
+      this.audioNode.disconnect();
     } catch {}
   }
 }

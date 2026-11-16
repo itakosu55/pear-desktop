@@ -15,7 +15,7 @@ class ButterchurnVisualizer extends Visualizer {
     audioSource: MediaElementAudioSourceNode,
     canvas: HTMLCanvasElement,
     audioNode: GainNode,
-    _stream: MediaStream,
+    _stream: MediaStream | undefined,
     config: VisualizerPluginConfig,
   ) {
     super(audioSource, audioNode);
@@ -46,7 +46,7 @@ class ButterchurnVisualizer extends Visualizer {
     if (this.animFrameHandle) cancelAnimationFrame(this.animFrameHandle);
     this.destroyed = true;
     try {
-      this.audioSource.disconnect(this.audioNode);
+      this.audioNode.disconnect();
     } catch {}
   }
 }

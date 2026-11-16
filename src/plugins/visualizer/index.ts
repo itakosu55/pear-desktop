@@ -1,4 +1,8 @@
 import { t } from '@/i18n';
+import {
+  getAudioLatencyMs,
+  onAudioLatencyChange,
+} from '@/plugins/utils/renderer/audio-latency';
 import { createPlugin } from '@/utils';
 
 import emptyStyle from './empty-player.css?inline';
@@ -57,11 +61,47 @@ export type VisualizerPluginConfig = {
   };
 };
 
+const MAX_DELAY_SECONDS = 2.0;
+
 type RenderProps = {
   visualizerInstance: Visualizer | null;
   audioContext: AudioContext | null;
   audioSource: MediaElementAudioSourceNode | null;
+  delayNode: DelayNode | null;
+  gainNode: GainNode | null;
+  mediaStreamDest: MediaStreamAudioDestinationNode | null;
   observer: ResizeObserver | null;
+  unsubscribeLatency: (() => void) | null;
+  audioCanPlayHandler: ((e: CustomEvent<Compressor>) => Promise<void>) | null;
+};
+
+const cleanupVisualizer = (state: RenderProps) => {
+  state.visualizerInstance?.destroy();
+  state.visualizerInstance = null;
+
+  if (state.delayNode) {
+    try {
+      state.audioSource?.disconnect(state.delayNode);
+    } catch {}
+    try {
+      state.delayNode.disconnect();
+    } catch {}
+    state.delayNode = null;
+  }
+
+  if (state.gainNode) {
+    try {
+      state.gainNode.disconnect();
+    } catch {}
+    state.gainNode = null;
+  }
+
+  if (state.mediaStreamDest) {
+    try {
+      state.mediaStreamDest.disconnect();
+    } catch {}
+    state.mediaStreamDest = null;
+  }
 };
 
 export default createPlugin({
@@ -158,22 +198,24 @@ export default createPlugin({
       visualizerInstance: null,
       audioContext: null,
       audioSource: null,
+      delayNode: null,
+      gainNode: null,
+      mediaStreamDest: null,
       observer: null,
+      unsubscribeLatency: null,
+      audioCanPlayHandler: null,
     } as RenderProps,
 
     createVisualizer(
       this: { props: RenderProps },
       config: VisualizerPluginConfig,
     ) {
-      this.props.visualizerInstance?.destroy();
-      this.props.visualizerInstance = null;
+      cleanupVisualizer(this.props);
 
       if (!this.props.audioContext || !this.props.audioSource) return;
       if (!config.enabled) return;
 
-      const video = document.querySelector<
-        HTMLVideoElement & { captureStream(): MediaStream }
-      >('video');
+      const video = document.querySelector('video');
       if (!video) {
         return;
       }
@@ -191,26 +233,52 @@ export default createPlugin({
         visualizerContainer?.prepend(canvas);
       }
 
+      // 解析用ブランチのみ遅延させ、audioContext.destination には接続しない
+      const delayNode = this.props.audioContext.createDelay(MAX_DELAY_SECONDS);
+      delayNode.delayTime.value = Math.min(
+        MAX_DELAY_SECONDS,
+        Math.max(0, getAudioLatencyMs('visualizer') / 1000),
+      );
+
       const gainNode = this.props.audioContext.createGain();
       gainNode.gain.value = 1.25;
-      this.props.audioSource.connect(gainNode);
 
-      let visualizerType: {
-        new (...args: ConstructorParameters<typeof vudio>): Visualizer;
-      } = vudio;
+      this.props.audioSource.connect(delayNode);
+      delayNode.connect(gainNode);
+      this.props.delayNode = delayNode;
+      this.props.gainNode = gainNode;
+
       if (config.type === 'wave') {
-        visualizerType = wave;
+        this.props.visualizerInstance = new wave(
+          this.props.audioContext,
+          this.props.audioSource,
+          canvas,
+          gainNode,
+          undefined,
+          config,
+        );
       } else if (config.type === 'butterchurn') {
-        visualizerType = butterchurn;
+        this.props.visualizerInstance = new butterchurn(
+          this.props.audioContext,
+          this.props.audioSource,
+          canvas,
+          gainNode,
+          undefined,
+          config,
+        );
+      } else {
+        const dest = this.props.audioContext.createMediaStreamDestination();
+        gainNode.connect(dest);
+        this.props.mediaStreamDest = dest;
+        this.props.visualizerInstance = new vudio(
+          this.props.audioContext,
+          this.props.audioSource,
+          canvas,
+          gainNode,
+          dest.stream,
+          config,
+        );
       }
-      this.props.visualizerInstance = new visualizerType(
-        this.props.audioContext,
-        this.props.audioSource,
-        canvas,
-        gainNode,
-        video.captureStream(),
-        config,
-      );
 
       const resizeVisualizer = () => {
         if (canvas && visualizerContainer) {
@@ -233,15 +301,48 @@ export default createPlugin({
     },
 
     onPlayerApiReady(_, { getConfig }) {
-      document.addEventListener(
-        'peard:audio-can-play',
-        async (e) => {
+      this.props.unsubscribeLatency?.();
+      this.props.unsubscribeLatency = onAudioLatencyChange(() => {
+        const { delayNode, audioContext } = this.props;
+        if (!delayNode || !audioContext) return;
+        const newSeconds = Math.min(
+          MAX_DELAY_SECONDS,
+          Math.max(0, getAudioLatencyMs('visualizer') / 1000),
+        );
+        delayNode.delayTime.setTargetAtTime(
+          newSeconds,
+          audioContext.currentTime,
+          0.05,
+        );
+      });
+
+      if (!this.props.audioCanPlayHandler) {
+        this.props.audioCanPlayHandler = async (e) => {
           this.props.audioContext = e.detail.audioContext;
           this.props.audioSource = e.detail.audioSource;
           this.createVisualizer(await getConfig());
-        },
-        { passive: true },
-      );
+        };
+        document.addEventListener(
+          'peard:audio-can-play',
+          this.props.audioCanPlayHandler,
+          { passive: true },
+        );
+      }
+    },
+
+    stop() {
+      this.props.unsubscribeLatency?.();
+      this.props.unsubscribeLatency = null;
+      if (this.props.audioCanPlayHandler) {
+        document.removeEventListener(
+          'peard:audio-can-play',
+          this.props.audioCanPlayHandler,
+        );
+        this.props.audioCanPlayHandler = null;
+      }
+      this.props.observer?.disconnect();
+      this.props.observer = null;
+      cleanupVisualizer(this.props);
     },
   },
 });
