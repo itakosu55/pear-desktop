@@ -5,6 +5,8 @@ import {
 import { createRenderer } from '@/utils';
 import { waitForElement } from '@/utils/wait-for-element';
 
+import { openCalibration as openCalibrationOverlay } from './calibration';
+import { clampManualOffsetMs } from './constants';
 import { VideoDelayRenderer } from './video-delay';
 
 import type { AudioLatencySyncPluginConfig } from './index';
@@ -34,17 +36,21 @@ export const renderer = createRenderer<
     sampleInterval?: ReturnType<typeof setInterval>;
     samples: number[];
     autoMs: number;
+    effectiveMs: number;
     lastLoggedEffectiveMs?: number;
     videoDelay?: VideoDelayRenderer;
+    closeCalibration?: () => void;
     runId: number;
     audioCanPlayHandler: (event: CustomEvent<Compressor>) => void;
     sample: () => void;
     recompute: () => void;
+    openCalibration: () => void;
   },
   AudioLatencySyncPluginConfig
 >({
   samples: [],
   autoMs: 0,
+  effectiveMs: 0,
   runId: 0,
 
   audioCanPlayHandler(event) {
@@ -104,10 +110,39 @@ export const renderer = createRenderer<
       MAX_EFFECTIVE_MS,
       Math.max(MIN_EFFECTIVE_MS, Math.round(effective)),
     );
+    this.effectiveMs = clamped;
     if (clamped !== this.lastLoggedEffectiveMs) {
       this.lastLoggedEffectiveMs = clamped;
       console.debug('[audio-latency-sync] Effective latency:', clamped, 'ms');
     }
+  },
+
+  openCalibration() {
+    if (this.closeCalibration || !this.ctx || !this.config) return;
+
+    const ctx = this.ctx;
+    const fallbackMode = this.config.mode;
+    const autoMs = this.autoMs;
+
+    this.closeCalibration = openCalibrationOverlay({
+      initialMs: this.effectiveMs,
+      autoMs,
+      audioContext: this.audioContext,
+      onApply: (valueMs) => {
+        const mode = this.config?.mode ?? fallbackMode;
+        if (mode === 'manual') {
+          ctx.setConfig({ manualOffsetMs: clampManualOffsetMs(valueMs) });
+        } else {
+          ctx.setConfig({
+            mode: 'auto-offset',
+            manualOffsetMs: clampManualOffsetMs(valueMs - autoMs),
+          });
+        }
+      },
+      onClose: () => {
+        this.closeCalibration = undefined;
+      },
+    });
   },
 
   async start(ctx) {
@@ -116,12 +151,15 @@ export const renderer = createRenderer<
       clearInterval(this.sampleInterval);
       this.sampleInterval = undefined;
     }
+    this.closeCalibration?.();
+    this.closeCalibration = undefined;
     this.videoDelay?.destroy();
     this.videoDelay = undefined;
     document.removeEventListener(
       'peard:audio-can-play',
       this.audioCanPlayHandler,
     );
+    ctx.ipc.removeAllListeners('audio-latency-sync:open-calibration');
 
     this.ctx = ctx;
     const config = await ctx.getConfig();
@@ -130,6 +168,7 @@ export const renderer = createRenderer<
     this.config = config;
     this.samples = [];
     this.autoMs = 0;
+    this.effectiveMs = 0;
     this.lastLoggedEffectiveMs = undefined;
 
     document.addEventListener(
@@ -137,6 +176,7 @@ export const renderer = createRenderer<
       this.audioCanPlayHandler,
       { passive: true },
     );
+    ctx.ipc.on('audio-latency-sync:open-calibration', this.openCalibration);
 
     this.recompute();
     this.sampleInterval = setInterval(this.sample, SAMPLE_INTERVAL_MS);
@@ -162,16 +202,20 @@ export const renderer = createRenderer<
       clearInterval(this.sampleInterval);
       this.sampleInterval = undefined;
     }
+    this.closeCalibration?.();
+    this.closeCalibration = undefined;
     this.videoDelay?.destroy();
     this.videoDelay = undefined;
     document.removeEventListener(
       'peard:audio-can-play',
       this.audioCanPlayHandler,
     );
+    this.ctx?.ipc.removeAllListeners('audio-latency-sync:open-calibration');
     this.audioContext = undefined;
     this.ctx = undefined;
     this.samples = [];
     this.autoMs = 0;
+    this.effectiveMs = 0;
     this.lastLoggedEffectiveMs = undefined;
     resetAudioLatency();
   },

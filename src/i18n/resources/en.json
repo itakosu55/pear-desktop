@@ -354,6 +354,7 @@
     "audio-latency-sync": {
       "description": "Delays video, lyrics and visualizers to compensate for output-device audio latency (e.g. Bluetooth)",
       "menu": {
+        "calibrate": "Calibrate with test signal...",
         "manual-offset": "Set manual offset...",
         "mode": {
           "label": "Mode",
@@ -369,6 +370,15 @@
       },
       "name": "Audio Latency Sync",
       "prompt": {
+        "calibration": {
+          "apply": "Apply",
+          "cancel": "Cancel",
+          "description": "Wear the headphones you want to calibrate. Move the slider until the flash and the beep happen at the same time.",
+          "detected": "OS-reported latency: {{detected}} ms",
+          "no-audio-context": "Play a song once before calibrating for the most accurate result.",
+          "title": "Calibrate audio latency",
+          "value": "{{value}} ms"
+        },
         "manual-offset": {
           "label": "Manual offset in ms (-1000 to 2000). OS-reported latency: {{detected}} ms",
           "title": "Set manual offset"

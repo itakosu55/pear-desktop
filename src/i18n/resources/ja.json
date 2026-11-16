@@ -354,6 +354,7 @@
     "audio-latency-sync": {
       "description": "出力デバイス（Bluetoothなど）の音声遅延に合わせて動画・歌詞・ビジュアライザーの表示を遅らせます",
       "menu": {
+        "calibrate": "テスト信号でキャリブレーション...",
         "manual-offset": "手動オフセットを設定...",
         "mode": {
           "label": "モード",
@@ -369,6 +370,15 @@
       },
       "name": "音声遅延補正",
       "prompt": {
+        "calibration": {
+          "apply": "適用",
+          "cancel": "キャンセル",
+          "description": "キャリブレーションしたいヘッドホンを装着してください。光とビープ音が同時に感じられるまでスライダーを調整します。",
+          "detected": "OS報告の遅延: {{detected}} ms",
+          "no-audio-context": "最も正確な結果を得るには、キャリブレーションの前に一度曲を再生してください。",
+          "title": "音声遅延のキャリブレーション",
+          "value": "{{value}} ms"
+        },
         "manual-offset": {
           "label": "手動オフセット（ms、-1000〜2000）。OS報告の遅延: {{detected}} ms",
           "title": "手動オフセットを設定"

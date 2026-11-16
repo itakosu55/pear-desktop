@@ -10,6 +10,7 @@ import {
   MIN_MANUAL_OFFSET_MS,
 } from './constants';
 import { renderer } from './renderer';
+import style from './style.css?inline';
 
 export interface AudioLatencySyncPluginConfig {
   enabled: boolean;
@@ -36,6 +37,7 @@ export default createPlugin({
   description: () => t('plugins.audio-latency-sync.description'),
   restartNeeded: false,
   config: defaultConfig,
+  stylesheets: [style],
   menu: async ({ getConfig, setConfig, window }) => {
     const config = await getConfig();
     const modes: AudioLatencySyncPluginConfig['mode'][] = [
@@ -90,6 +92,12 @@ export default createPlugin({
           if (!Number.isFinite(parsed)) return;
 
           setConfig({ manualOffsetMs: clampManualOffsetMs(parsed) });
+        },
+      },
+      {
+        label: t('plugins.audio-latency-sync.menu.calibrate'),
+        click() {
+          window.webContents.send('audio-latency-sync:open-calibration');
         },
       },
       {
